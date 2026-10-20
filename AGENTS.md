@@ -52,6 +52,9 @@ mistakes. Load those only as needed.
 Prerequisites: Loup 1.26.0 (`loup` and `loup-bootstrap` on `PATH`), `make`,
 and `clang` 17 or later for native builds.
 
+Loup Lite comes from <https://github.com/code-craft-ai-company/loup-releases>;
+[README.md](README.md#installing-loup-lite) has the install commands.
+
 | Task | Command | Notes |
 |------|---------|-------|
 | Run from source | `make run ARGS="-c tests/fixtures/fruit.txt"` | `loup run source/main.loup -- ARGS`; an OUTPUT operand and output that is not UTF-8 need the native build |
