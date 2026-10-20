@@ -1,0 +1,160 @@
+@mode(host.dual)
+
+# The part of a line that uniq compares, and the comparison: GNU uniq's
+# find_field() and different(). Lines are byte ranges [start, end) of the
+# input, without their delimiter, and nothing here allocates, because a
+# native build never frees what a loop allocates.
+#
+# -f, -s and -w step over characters: a well-formed UTF-8 sequence is one
+# character, any other byte is a character of its own (as GNU uniq 9.5
+# does in a UTF-8 locale). The comparison itself is on bytes, with -i
+# folding ASCII letters only (GNU's memcasecmp).
+
+# The length in bytes of the character at `i` (i < lim): 2 to 4 for a
+# well-formed UTF-8 sequence that ends by `lim`, else 1.
+pub func char_len(data: bytes, i: int, lim: int): int {
+    let b = data[i];
+    if (b < 128) {
+        return 1;
+    }
+    var need = 0;
+    var lo = 128;
+    var hi = 191;
+    if (b >= 194 and b <= 223) {
+        need = 1;
+    } else if (b >= 224 and b <= 239) {
+        need = 2;
+        if (b == 224) {
+            lo = 160;
+        } else if (b == 237) {
+            hi = 159;
+        }
+    } else if (b >= 240 and b <= 244) {
+        need = 3;
+        if (b == 240) {
+            lo = 144;
+        } else if (b == 244) {
+            hi = 143;
+        }
+    } else {
+        return 1;
+    }
+    if (i + need >= lim) {
+        return 1;
+    }
+    var k = 1;
+    while (k <= need) {
+        let c = data[i + k];
+        if (c < lo or c > hi) {
+            return 1;
+        }
+        lo = 128;
+        hi = 191;
+        k += 1;
+    }
+    return need + 1;
+}
+
+# Whether the character of `len` bytes at `i` separates fields: a newline
+# (seen only with -z) or a blank, as glibc's iswblank() has them in a UTF-8
+# locale: TAB, space, U+1680, U+2000-U+2006, U+2008-U+200A, U+205F, U+3000.
+pub func is_blank_at(data: bytes, i: int, len: int): bool {
+    let b = data[i];
+    if (len == 1) {
+        return b == 9 or b == 10 or b == 32;
+    }
+    if (len != 3) {
+        return false;
+    }
+    let b1 = data[i + 1];
+    let b2 = data[i + 2];
+    if (b == 225) {
+        return b1 == 154 and b2 == 128;
+    }
+    if (b == 226 and b1 == 128) {
+        return (b2 >= 128 and b2 <= 134) or (b2 >= 136 and b2 <= 138);
+    }
+    if (b == 226 and b1 == 129) {
+        return b2 == 159;
+    }
+    return b == 227 and b1 == 128 and b2 == 128;
+}
+
+# Where the compared part of the line [start, end) begins: after
+# `skip_fields` fields (each a run of blanks, then of non-blanks), then
+# `skip_chars` characters.
+pub func key_start(data: bytes, start: int, end: int, skip_fields: int, skip_chars: int): int {
+    var p = start;
+    var f = skip_fields;
+    while (f > 0 and p < end) {
+        while (p < end) {
+            let len = char_len(data, p, end);
+            if (!is_blank_at(data, p, len)) {
+                break;
+            }
+            p += len;
+        }
+        while (p < end) {
+            let len = char_len(data, p, end);
+            if (is_blank_at(data, p, len)) {
+                break;
+            }
+            p += len;
+        }
+        f -= 1;
+    }
+    var c = skip_chars;
+    while (c > 0 and p < end) {
+        p += char_len(data, p, end);
+        c -= 1;
+    }
+    return p;
+}
+
+# Where the compared part that begins at `p` ends: after at most
+# `check_chars` characters, or at `end`.
+pub func key_end(data: bytes, p: int, end: int, check_chars: int): int {
+    if (end - p <= check_chars) {
+        return end;
+    }
+    var q = p;
+    var c = check_chars;
+    while (c > 0 and q < end) {
+        q += char_len(data, q, end);
+        c -= 1;
+    }
+    return q;
+}
+
+func upper_ascii(b: int): int {
+    if (b >= 97 and b <= 122) {
+        return b - 32;
+    }
+    return b;
+}
+
+# Whether the byte ranges [a, a_end) and [b, b_end) differ (with
+# `ignore_case`, ASCII letters match either case).
+pub func different(data: bytes, a: int, a_end: int, b: int, b_end: int, ignore_case: bool): bool {
+    let n = a_end - a;
+    if (n != b_end - b) {
+        return true;
+    }
+    var k = 0;
+    if (ignore_case) {
+        while (k < n) {
+            if (upper_ascii(data[a + k]) != upper_ascii(data[b + k])) {
+                return true;
+            }
+            k += 1;
+        }
+        return false;
+    }
+    while (k < n) {
+        if (data[a + k] != data[b + k]) {
+            return true;
+        }
+        k += 1;
+    }
+    return false;
+}

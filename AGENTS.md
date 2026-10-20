@@ -1,7 +1,8 @@
 # AGENTS.md
 
-This repository is a GitHub template for building a command-line application
-in the Loup programming language. The program is built as a native executable.
+This repository recreates GNU `uniq` in the Loup programming language, as
+part of the loup-cmd series of example applications. The program is
+`host.dual` Loup built as a native executable.
 
 ## Skills
 
@@ -20,23 +21,27 @@ mistakes. Load those only as needed.
 ```text
 .
 ├── package.lppkg                # Loup manifest: name, version, toolchain, [build] entry, [test] pattern
-├── Makefile                     # run, check, test, build, ci, clean
+├── Makefile                     # run, check, test, build, e2e, ci, clean
 ├── source/                      # all Loup code; modules import each other by path from here
 │   ├── main.loup                # entry point: func main() calls run(runtime.args())
 │   ├── appinfo.loup             # APP_NAME, APP_VERSION, APP_SUMMARY, exit statuses
 │   ├── cli/
-│   │   ├── args.loup            # struct Options, parse_args()
+│   │   ├── getopt.loup          # scan_options(): GNU getopt_long rules, three orderings, messages
+│   │   ├── argmatch.loup        # argmatch(), argmatch_error(): METHOD values
+│   │   ├── numbers.loup         # parse_size(), parse_plus(): counts for -f, -s, -w, +N
+│   │   ├── args.loup            # class Options, parse_args(): options, operands, cross-checks
+│   │   ├── quote.loup           # quote(), quote_name(), quote_always(): GNU-style quoting
 │   │   ├── usage.loup           # usage(), version_line()
-│   │   └── app.loup             # run(), dispatch(): routes commands, maps errors to exit statuses
-│   └── commands/                # one module per command
-│       └── hello.loup           # sample command: run_hello()
-├── tests/                       # tests: <module>_test.loup files with func test_*(): void
-│   ├── app_test.loup
-│   ├── args_test.loup
-│   └── hello_test.loup
-├── specs/                       # feature specs: <feature>/requirements.md, design.md, tasks.md
-│   ├── README.md
-│   └── command-line-interface/
+│   │   └── app.loup             # run(): parse, --help/--version, run_uniq, exit status
+│   └── commands/
+│       ├── fields.loup          # char_len(), key_start(), key_end(), different()
+│       ├── output.loup          # append_count(), flush_bytes(), redirect_stdout()
+│       └── uniq.loup            # class Uniq (the state machine), uniq_bytes(), run_uniq()
+├── tests/
+│   ├── *_test.loup              # unit tests: func test_*(): void
+│   ├── e2e.sh                   # end-to-end tests of the native binary
+│   └── fixtures/                # input files for the examples and e2e.sh
+├── specs/uniq/                  # requirements.md, design.md, tasks.md
 ├── skills/loup-programmer/      # the Loup skill and its references
 ├── .github/workflows/ci.yml     # installs Loup and runs `make ci`
 └── build/                       # build output (git-ignored)
@@ -49,14 +54,15 @@ and `clang` 17 or later for native builds.
 
 | Task | Command | Notes |
 |------|---------|-------|
-| Run from source | `make run ARGS="hello Ann --shout"` | `loup run source/main.loup -- ARGS` |
+| Run from source | `make run ARGS="-c tests/fixtures/fruit.txt"` | `loup run source/main.loup -- ARGS`; an OUTPUT operand and output that is not UTF-8 need the native build |
 | Type-check | `make check` | checks `source/main.loup` and every module it imports; tests are not checked |
-| Run all tests | `make test` | every `tests/*_test.loup` |
-| Run matching tests | `make test TEST_ARGS="--filter value"` | tests whose name contains `value` |
+| Run all tests | `make test` | every `tests/*_test.loup`, one at a time |
+| Run matching tests | `make test TEST_ARGS="--filter group"` | tests whose name contains `group` |
 | Run one test file | `make test TEST_ARGS="--file tests/args_test.loup"` | |
-| Build | `make build` | native binary at `build/myapp` |
-| Run the binary | `build/myapp --help` | |
-| Everything CI runs | `make ci` | check, test, build, then `build/myapp --version` |
+| Build | `make build` | native binary at `build/uniq` |
+| Run the binary | `build/uniq --help` | |
+| End-to-end tests | `make e2e` | runs `tests/e2e.sh build/uniq`: output compared byte for byte |
+| Everything CI runs | `make ci` | check, test, build, e2e, then `build/uniq --version` |
 | Clean | `make clean` | removes `build/` and `.temp/` |
 
 Run `make ci` before reporting a change as done. `loup run` and the native
@@ -70,21 +76,15 @@ both, and sets `LOUPPATH=source` for tests.
 
 ## Making a change
 
-1. Write or update the spec in `specs/<feature>/` (see [specs/README.md](specs/README.md)).
+1. Update the spec in `specs/uniq/` (see [specs/README.md](specs/README.md)).
 2. Change the code under `source/`.
-3. Add or update tests in `tests/`.
+3. Add or update unit tests in `tests/` and cases in `tests/e2e.sh`.
 4. Run `make ci`.
-5. Tick the finished tasks in `specs/<feature>/tasks.md`.
+5. Tick the finished tasks in `specs/uniq/tasks.md`.
 
-To add a command:
-
-1. Create `source/commands/<name>.loup` with `@mode(host.dual)` and
-   `pub func run_<name>(opts: Options): int`, returning an exit status from
-   `appinfo`.
-2. Add an arm for it to `dispatch` in `source/cli/app.loup`.
-3. Describe it in `usage()` in `source/cli/usage.loup`.
-4. Add any new options to `Options` and `parse_args` in `source/cli/args.loup`.
-5. Add `tests/<name>_test.loup`.
+Keep behaviour in pure functions that return values (`uniq_bytes` returns
+the whole output for an input, `parse_args` the options or the message) so
+unit tests can check it; only `run_uniq` reads and writes.
 
 ## Conventions
 
@@ -94,10 +94,19 @@ To add a command:
   `from cli.args import (Options);`. Tests import them the same way. Do not
   use relative imports (`from .args import ...`): the self-hosted `loup run`
   on Linux x86-64 fails on them.
-- Struct fields read from another module must be `pub`.
-- The native build supports less than `loup run` does. For example,
-  `list.is_empty()` fails native codegen (`E-CODEGEN-UNHANDLED-METHOD`); use
-  `len() == 0`.
+- Records shared between modules are classes (`Options`, `Uniq`), and the
+  few structs (in `getopt.loup`) have field names used nowhere else: the
+  native build lays out struct fields by name across the whole program.
+- Work on the input as bytes and byte ranges, and do not allocate per line:
+  the native runtime never frees what a loop allocates. Reuse one output
+  list and empty it with `pop()` (`list.clear()` and `list.is_empty()` fail
+  native codegen).
+- The native runtime does not let a program catch the `IoError` from
+  `readBytes`, so `run_uniq` checks `exists` and `io.fs.isDir` first.
+- GNU uniq is installed here as `gnuuniq` (plain `uniq` may be uutils);
+  compare behaviour with it, but write expected output into
+  `tests/e2e.sh`. Its character handling depends on the locale: compare in
+  a UTF-8 locale, and use `LC_ALL=C` only to see its ASCII quotes.
 - Keep `APP_VERSION` in `source/appinfo.loup` equal to `version` in
   `package.lppkg`.
 - The skill's examples use the `loup init` layout (`src/`, `tests/`, and

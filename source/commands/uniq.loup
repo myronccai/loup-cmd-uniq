@@ -1,0 +1,202 @@
+@mode(host.dual)
+
+# uniq: GNU uniq's check_file() as a state machine over the lines of the
+# input. Each line is compared with the previous one (on the part that
+# fields.loup picks out); what is printed depends on the options.
+#
+# The input is read whole (Loup has no streaming reader); lines are byte
+# ranges in it, so nothing is copied or allocated per line.
+
+import io.fs as fs;
+from appinfo import (APP_NAME, EXIT_OK, EXIT_FAILURE);
+from cli.args import (Options, DELIMIT_NONE, DELIMIT_PREPEND, DELIMIT_SEPARATE, GROUP_NONE, GROUP_PREPEND, GROUP_APPEND, GROUP_SEPARATE, GROUP_BOTH);
+from cli.quote import (quote_name, quote_always);
+from commands.fields import (key_start, key_end, different);
+from commands.output import (append_count, flush_bytes, redirect_stdout);
+
+# Output bytes collected before they are written.
+const CHUNK: int = 65536;
+
+pub class Uniq {
+    var opts: Options = Options();
+    # GNU's fast path: every line of a group of one or of the first of a
+    # group is printed at once, so no line needs to wait for the next.
+    var simple: bool = true;
+    var have_prev: bool = false;
+    var prev_start: int = 0;
+    var prev_end: int = 0;
+    var prev_key: int = 0;
+    var prev_key_end: int = 0;
+    var match_count: int = 0;
+    var first_delimiter: bool = true;
+    var first_group_printed: bool = false;
+
+    pub func constructor(settings: Options) {
+        this.opts = settings;
+        this.simple = settings.output_unique and settings.output_first_repeated and !settings.count;
+    }
+
+    modifier func remember(start: int, end: int, key: int, key_end_at: int): void {
+        this.have_prev = true;
+        this.prev_start = start;
+        this.prev_end = end;
+        this.prev_key = key;
+        this.prev_key_end = key_end_at;
+    }
+
+    func emit(data: bytes, start: int, end: int, edits out: list[int]): void {
+        var k = start;
+        while (k < end) {
+            out.push(data[k]);
+            k += 1;
+        }
+        out.push(this.opts.delimiter);
+    }
+
+    # GNU's writeline(): the previous line, if the options want it, with
+    # its count. `linecount` is how many lines matched it.
+    func write_prev(data: bytes, matched: bool, linecount: int, edits out: list[int]): void {
+        var wanted = this.opts.output_later_repeated;
+        if (linecount == 0) {
+            wanted = this.opts.output_unique;
+        } else if (!matched) {
+            wanted = this.opts.output_first_repeated;
+        }
+        if (!wanted) {
+            return;
+        }
+        if (this.opts.count) {
+            append_count(linecount + 1, edits: out);
+        }
+        this.emit(data, this.prev_start, this.prev_end, edits: out);
+    }
+
+    # Takes the next line, data[start, end) without its delimiter, and
+    # appends what it makes uniq print to `out`.
+    pub modifier func line(data: bytes, start: int, end: int, edits out: list[int]): void {
+        let o = this.opts;
+        let key = key_start(data, start, end, o.skip_fields, o.skip_chars);
+        let key_stop = key_end(data, key, end, o.check_chars);
+
+        if (this.simple) {
+            let new_group = (!this.have_prev
+                or different(data, key, key_stop, this.prev_key, this.prev_key_end, o.ignore_case));
+            let g = o.grouping;
+            if (new_group and g != GROUP_NONE) {
+                if (g == GROUP_PREPEND or g == GROUP_BOTH
+                    or (this.first_group_printed and (g == GROUP_APPEND or g == GROUP_SEPARATE))) {
+                    out.push(o.delimiter);
+                }
+            }
+            if (new_group or g != GROUP_NONE) {
+                this.emit(data, start, end, edits: out);
+                this.remember(start, end, key, key_stop);
+                this.first_group_printed = true;
+            }
+            return;
+        }
+
+        if (!this.have_prev) {
+            this.remember(start, end, key, key_stop);
+            return;
+        }
+        let matched = !different(data, key, key_stop, this.prev_key, this.prev_key_end, o.ignore_case);
+        if (matched) {
+            this.match_count += 1;
+        }
+        if (o.delimit != DELIMIT_NONE) {
+            if (!matched) {
+                if (this.match_count > 0) {
+                    this.first_delimiter = false;
+                }
+            } else if (this.match_count == 1) {
+                if (o.delimit == DELIMIT_PREPEND or (o.delimit == DELIMIT_SEPARATE and !this.first_delimiter)) {
+                    out.push(o.delimiter);
+                }
+            }
+        }
+        if (!matched or o.output_later_repeated) {
+            this.write_prev(data, matched, this.match_count, edits: out);
+            this.remember(start, end, key, key_stop);
+            if (!matched) {
+                this.match_count = 0;
+            }
+        }
+    }
+
+    # Ends the input: prints what is still pending.
+    pub modifier func finish(data: bytes, edits out: list[int]): void {
+        let o = this.opts;
+        if (this.simple) {
+            if ((o.grouping == GROUP_BOTH or o.grouping == GROUP_APPEND) and this.first_group_printed) {
+                out.push(o.delimiter);
+            }
+            return;
+        }
+        if (this.have_prev) {
+            this.write_prev(data, false, this.match_count, edits: out);
+        }
+    }
+}
+
+# Runs uniq over all of `data`, appending the output bytes to `out`. When
+# `streaming` is set, `out` is written to standard output and emptied
+# whenever it grows past CHUNK.
+pub func uniq_into(data: bytes, opts: Options, streaming: bool, edits out: list[int]): void {
+    let state = Uniq(opts);
+    let delim = opts.delimiter;
+    let n = data.len();
+    var start = 0;
+    while (start < n) {
+        var end = start;
+        while (end < n and data[end] != delim) {
+            end += 1;
+        }
+        safe {
+            state.line(data, start, end, edits: out);
+        }
+        start = end + 1;
+        if (streaming and out.len() >= CHUNK) {
+            flush_bytes(edits: out);
+        }
+    }
+    safe {
+        state.finish(data, edits: out);
+    }
+}
+
+# uniq's output for `data`, as bytes (for tests and examples).
+pub func uniq_bytes(data: bytes, opts: Options): list[int] {
+    var out: list[int] = [];
+    uniq_into(data, opts, false, edits: out);
+    return out;
+}
+
+pub func run_uniq(opts: Options): int {
+    # The native runtime cannot catch a failed read, so problems are
+    # checked first, in GNU's order: the input, then the output, then
+    # reading.
+    let input = opts.input;
+    if (input != "-" and !exists(input)) {
+        printErr(i"{$ APP_NAME $}: {$ quote_name(input) $}: No such file or directory");
+        return EXIT_FAILURE;
+    }
+    if (opts.output != "-") {
+        let problem = redirect_stdout(opts.output);
+        if (problem.len() > 0) {
+            printErr(i"{$ APP_NAME $}: {$ quote_name(opts.output) $}: {$ problem $}");
+            printErr(i"{$ APP_NAME $}: write error: {$ problem $}");
+            return EXIT_FAILURE;
+        }
+    }
+    let path = if (input == "-") { "/dev/stdin" } else { input };
+    if (fs.isDir(path)) {
+        printErr(i"{$ APP_NAME $}: error reading {$ quote_always(input) $}: Is a directory");
+        return EXIT_FAILURE;
+    }
+    let data = readBytes(path);
+    var out: list[int] = [];
+    uniq_into(data, opts, true, edits: out);
+    flush_bytes(edits: out);
+    return EXIT_OK;
+}

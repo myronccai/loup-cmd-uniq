@@ -1,0 +1,20 @@
+@mode(host.dual)
+
+from debug.assert import (expect, expectEq);
+from commands.output import (append_count, is_utf8);
+
+func test_append_count(): void {
+    var out: list[int] = [];
+    append_count(42, edits: out);
+    expectEq(bytesFromInts(out).decode(), "     42 ", "%7d and a space");
+    var wide: list[int] = [];
+    append_count(123456789, edits: wide);
+    expectEq(bytesFromInts(wide).decode(), "123456789 ", "wider than 7");
+}
+
+func test_is_utf8(): void {
+    expect(is_utf8([97, 195, 169, 0]), "ASCII, é and NUL");
+    expect(!is_utf8([97, 255]), "stray byte");
+    expect(!is_utf8([226, 130]), "truncated");
+    expect(!is_utf8([237, 160, 128]), "surrogate");
+}

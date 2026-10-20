@@ -1,0 +1,83 @@
+@mode(host.dual)
+
+from debug.assert import (expect, expectEq);
+from commands.fields import (char_len, is_blank_at, key_start, key_end, different);
+
+# The UTF-8 bytes of a string.
+func utf8(text: string): bytes {
+    var out: list[int] = [];
+    for (ch in text) {
+        var cp = 0;
+        match char.fromString(ch) {
+            Some(c) => {
+                cp = c.toInt();
+            },
+            None => {},
+        }
+        if (cp < 128) {
+            out.push(cp);
+        } else if (cp < 2048) {
+            out.push(192 + cp / 64);
+            out.push(128 + cp % 64);
+        } else if (cp < 65536) {
+            out.push(224 + cp / 4096);
+            out.push(128 + (cp / 64) % 64);
+            out.push(128 + cp % 64);
+        } else {
+            out.push(240 + cp / 262144);
+            out.push(128 + (cp / 4096) % 64);
+            out.push(128 + (cp / 64) % 64);
+            out.push(128 + cp % 64);
+        }
+    }
+    return bytesFromInts(out);
+}
+
+func test_char_len(): void {
+    let d = utf8("aé日😀");
+    expectEq(char_len(d, 0, d.len()), 1, "ASCII");
+    expectEq(char_len(d, 1, d.len()), 2, "two bytes");
+    expectEq(char_len(d, 3, d.len()), 3, "three bytes");
+    expectEq(char_len(d, 6, d.len()), 4, "four bytes");
+    expectEq(char_len(d, 1, 2), 1, "cut short by the limit");
+    let bad = bytesFromInts([255, 195, 40]);
+    expectEq(char_len(bad, 0, 3), 1, "stray byte");
+    expectEq(char_len(bad, 1, 3), 1, "bad continuation");
+}
+
+func test_blanks(): void {
+    # space, TAB, newline, U+3000, U+00A0, a
+    let d = bytesFromInts([32, 9, 10, 227, 128, 128, 194, 160, 97]);
+    expect(is_blank_at(d, 0, 1) and is_blank_at(d, 1, 1) and is_blank_at(d, 2, 1), "space, TAB, newline");
+    expect(is_blank_at(d, 3, 3), "U+3000");
+    expect(!is_blank_at(d, 6, 2), "U+00A0 is not a blank");
+    expect(!is_blank_at(d, 8, 1), "a letter");
+}
+
+func test_key_start(): void {
+    let d = utf8("  one\ttwo three");
+    let n = d.len();
+    expectEq(key_start(d, 0, n, 0, 0), 0, "nothing skipped");
+    expectEq(key_start(d, 0, n, 1, 0), 5, "blanks and a field");
+    expectEq(key_start(d, 0, n, 2, 0), 9, "two fields");
+    expectEq(key_start(d, 0, n, 2, 2), 11, "then two characters");
+    expectEq(key_start(d, 0, n, 9, 0), n, "past the end");
+    let e = utf8("éé x");
+    expectEq(key_start(e, 0, e.len(), 0, 1), 2, "characters, not bytes");
+}
+
+func test_key_end(): void {
+    let d = utf8("日本語");
+    expectEq(key_end(d, 0, d.len(), 2), 6, "two characters");
+    expectEq(key_end(d, 0, d.len(), 9), 9, "the whole line");
+    expectEq(key_end(d, 0, d.len(), 0), 0, "nothing");
+}
+
+func test_different(): void {
+    let d = utf8("abcABCabd");
+    expect(!different(d, 0, 3, 0, 3, false), "same range");
+    expect(different(d, 0, 3, 3, 6, false), "case matters");
+    expect(!different(d, 0, 3, 3, 6, true), "unless ignored");
+    expect(different(d, 0, 3, 6, 9, true), "different letters");
+    expect(different(d, 0, 3, 0, 2, false), "different lengths");
+}

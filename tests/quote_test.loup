@@ -1,0 +1,25 @@
+@mode(host.dual)
+
+from debug.assert import (expectEq);
+from cli.quote import (quote, quote_name, quote_always);
+
+func test_quote(): void {
+    expectEq(quote("c"), "'c'", "plain");
+    expectEq(quote("it's"), "'it\\'s'", "apostrophe");
+    expectEq(quote("a\\b"), "'a\\\\b'", "backslash");
+    expectEq(quote("a\tb"), "'a\\tb'", "control");
+}
+
+func test_quote_name(): void {
+    expectEq(quote_name("plain.txt"), "plain.txt", "plain");
+    expectEq(quote_name("a b"), "'a b'", "space");
+    expectEq(quote_name("it's"), "\"it's\"", "apostrophe");
+    expectEq(quote_name("tab\there"), "'tab'$'\\t''here'", "control");
+    expectEq(quote_name(""), "''", "empty");
+}
+
+func test_quote_always(): void {
+    expectEq(quote_always("dir"), "'dir'", "always quoted");
+    expectEq(quote_always("-"), "'-'", "dash");
+    expectEq(quote_always("it's"), "\"it's\"", "apostrophe");
+}

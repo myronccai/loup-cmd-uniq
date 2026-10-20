@@ -1,0 +1,44 @@
+@mode(host.dual)
+
+# gnulib's argmatch, which GNU uniq uses for `--all-repeated=METHOD` and
+# `--group=METHOD`: a value may be any unambiguous prefix of a valid one,
+# and an exact match always wins. Messages are gnulib's.
+
+from cli.quote import (quote);
+
+# The index of `value` in `choices`, -1 when nothing matches, or -2 when
+# it is a prefix of more than one choice.
+pub func argmatch(value: string, choices: list[string]): int {
+    var found = -1;
+    var ambiguous = false;
+    var k = 0;
+    while (k < choices.len()) {
+        let c = choices[k];
+        if (c.startsWith(value)) {
+            if (c == value) {
+                return k;
+            }
+            if (found < 0) {
+                found = k;
+            } else {
+                ambiguous = true;
+            }
+        }
+        k += 1;
+    }
+    if (ambiguous) {
+        return -2;
+    }
+    return found;
+}
+
+# The message for a value argmatch rejected (`index` is -1 or -2), with
+# the list of valid values, as gnulib's argmatch_die prints it.
+pub func argmatch_error(value: string, option: string, index: int, choices: list[string]): string {
+    let what = if (index == -2) { "ambiguous" } else { "invalid" };
+    var lines: list[string] = [what + " argument " + quote(value) + " for " + quote(option), "Valid arguments are:"];
+    for (c in choices) {
+        lines.push("  - " + quote(c));
+    }
+    return lines.join("\n");
+}

@@ -1,0 +1,71 @@
+@mode(host.dual)
+
+from debug.assert import (expect, expectEq);
+from cli.getopt import (OptSpec, Scan, opt, scan_options, PERMUTE, REQUIRE_ORDER, RETURN_IN_ORDER, OPERAND, NO_VALUE, NEEDS_VALUE, MAY_HAVE_VALUE);
+
+func specs(): list[OptSpec] {
+    return [
+        opt("a", "all", NO_VALUE, "a"),
+        opt("n", "number", NEEDS_VALUE, "n"),
+        opt("", "style", MAY_HAVE_VALUE, "style"),
+        opt("", "count", NO_VALUE, "count"),
+        opt("", "complement", NO_VALUE, "complement"),
+        opt("", "help", NO_VALUE, "help"),
+    ];
+}
+
+func test_permute(): void {
+    let s = scan_options(["x", "-a", "y"], specs(), PERMUTE);
+    expectEq(s.hits.len(), 1, "one option");
+    expectEq(s.operands.len(), 2, "two operands");
+}
+
+func test_require_order(): void {
+    let s = scan_options(["x", "-a"], specs(), REQUIRE_ORDER);
+    expectEq(s.hits.len(), 0, "no options after the first operand");
+    expectEq(s.operands[1], "-a", "kept as an operand");
+}
+
+func test_return_in_order(): void {
+    let s = scan_options(["x", "-a", "-", "--", "-n"], specs(), RETURN_IN_ORDER);
+    expectEq(s.hits.len(), 3, "operand, option, operand");
+    expectEq(s.hits[0].hit_key, OPERAND, "x is an operand");
+    expectEq(s.hits[0].hit_value, "x", "its text");
+    expectEq(s.hits[1].hit_key, "a", "then -a");
+    expectEq(s.hits[2].hit_value, "-", "lone dash");
+    expectEq(s.operands.len(), 1, "after --");
+    expectEq(s.operands[0], "-n", "not an option");
+}
+
+func test_values(): void {
+    let s = scan_options(["-n3", "-an", "4", "--number=5", "--num", "6"], specs(), PERMUTE);
+    expectEq(s.hits.len(), 5, "five hits");
+    expectEq(s.hits[0].hit_value, "3", "attached");
+    expectEq(s.hits[2].hit_value, "4", "next argument");
+    expectEq(s.hits[3].hit_value, "5", "--name=value");
+    expectEq(s.hits[4].hit_value, "6", "abbreviated, next argument");
+}
+
+func test_optional_values(): void {
+    let s = scan_options(["--style", "x", "--style=", "--style=y"], specs(), PERMUTE);
+    expect(!s.hits[0].hit_has_value, "no value without =");
+    expectEq(s.operands[0], "x", "x is an operand");
+    expect(s.hits[1].hit_has_value, "empty value");
+    expectEq(s.hits[1].hit_value, "", "it is empty");
+    expectEq(s.hits[2].hit_value, "y", "a value");
+}
+
+func test_errors_keep_earlier_hits(): void {
+    let s = scan_options(["-a", "x", "-q", "-a"], specs(), RETURN_IN_ORDER);
+    expectEq(s.scan_error, "invalid option -- 'q'", "message");
+    expectEq(s.hits.len(), 2, "what came before");
+}
+
+func test_messages(): void {
+    expectEq(scan_options(["--nope"], specs(), PERMUTE).scan_error, "unrecognized option '--nope'", "unknown");
+    expectEq(scan_options(["--co"], specs(), PERMUTE).scan_error, "option '--co' is ambiguous; possibilities: '--count' '--complement'", "ambiguous");
+    expectEq(scan_options(["--all=1"], specs(), PERMUTE).scan_error, "option '--all' doesn't allow an argument", "no argument");
+    expectEq(scan_options(["-n"], specs(), PERMUTE).scan_error, "option requires an argument -- 'n'", "missing short value");
+    expectEq(scan_options(["--number"], specs(), PERMUTE).scan_error, "option '--number' requires an argument", "missing long value");
+    expectEq(scan_options(["--help", "-q"], specs(), PERMUTE).scan_error, "", "--help stops the scan");
+}

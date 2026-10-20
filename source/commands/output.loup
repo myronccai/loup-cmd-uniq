@@ -1,0 +1,139 @@
+@mode(host.dual)
+
+# Writing uniq's output. Output is collected as bytes (a list of ints) and
+# written a chunk at a time: as a string when it is well-formed UTF-8, or
+# else through C's putchar, because a Loup string cannot hold other bytes.
+# An OUTPUT operand becomes standard output itself, as GNU uniq's freopen
+# makes it: the file is opened with open(2) and moved onto descriptor 1.
+# The C functions exist only in a native build; `loup run` stops at them
+# ("unsupported instruction").
+
+import io.fs as fs;
+from io.path import (dirname);
+
+extern native "c" func putchar(c: int32): int32;
+extern native "c" func fflush(stream: int): int32;
+extern native "c" func open(path: string, flags: int32, mode: int32): int32;
+extern native "c" func dup2(fd: int32, target: int32): int32;
+extern native "c" func close(fd: int32): int32;
+
+# O_WRONLY | O_CREAT | O_TRUNC on Linux, and mode 0666.
+const OPEN_FLAGS: int32 = 577;
+const OPEN_MODE: int32 = 438;
+
+# Appends `n` right-aligned in 7 columns and a space (printf's "%7jd ").
+pub func append_count(n: int, edits out: list[int]): void {
+    var digits: list[int] = [];
+    var v = n;
+    while (true) {
+        digits.push(48 + v % 10);
+        v = v / 10;
+        if (v == 0) {
+            break;
+        }
+    }
+    var pad = 7 - digits.len();
+    while (pad > 0) {
+        out.push(32);
+        pad -= 1;
+    }
+    var k = digits.len() - 1;
+    while (k >= 0) {
+        out.push(digits[k]);
+        k -= 1;
+    }
+    out.push(32);
+}
+
+# Whether a list of bytes is well-formed UTF-8.
+pub func is_utf8(data: list[int]): bool {
+    let n = data.len();
+    var i = 0;
+    while (i < n) {
+        let b = data[i];
+        if (b < 128) {
+            i += 1;
+            continue;
+        }
+        var need = 0;
+        var lo = 128;
+        var hi = 191;
+        if (b >= 194 and b <= 223) {
+            need = 1;
+        } else if (b >= 224 and b <= 239) {
+            need = 2;
+            if (b == 224) {
+                lo = 160;
+            } else if (b == 237) {
+                hi = 159;
+            }
+        } else if (b >= 240 and b <= 244) {
+            need = 3;
+            if (b == 240) {
+                lo = 144;
+            } else if (b == 244) {
+                hi = 143;
+            }
+        } else {
+            return false;
+        }
+        if (i + need >= n) {
+            return false;
+        }
+        var k = 1;
+        while (k <= need) {
+            let c = data[i + k];
+            if (c < lo or c > hi) {
+                return false;
+            }
+            lo = 128;
+            hi = 191;
+            k += 1;
+        }
+        i += need + 1;
+    }
+    return true;
+}
+
+# Writes the bytes to standard output and empties the list (keeping its
+# storage: `clear()` has no native lowering, and a new list per chunk
+# would never be freed).
+pub func flush_bytes(edits buf: list[int]): void {
+    if (buf.len() > 0) {
+        if (is_utf8(buf)) {
+            print(bytesFromInts(buf).decode());
+        } else {
+            for (b in buf) {
+                putchar(b as int32);
+            }
+            # fflush(NULL), so that later output stays in order.
+            fflush(0);
+        }
+    }
+    while (buf.len() > 0) {
+        buf.pop();
+    }
+}
+
+# Makes standard output the file `path`, created or truncated. Returns ""
+# on success, or why it failed, in strerror's words.
+pub func redirect_stdout(path: string): string {
+    if (fs.isDir(path)) {
+        return "Is a directory";
+    }
+    let fd = open(path, OPEN_FLAGS, OPEN_MODE);
+    if (fd < 0) {
+        let parent = dirname(path);
+        let dir = if (parent.len() == 0) { "." } else { parent };
+        if (!exists(dir)) {
+            return "No such file or directory";
+        }
+        if (!fs.isDir(dir)) {
+            return "Not a directory";
+        }
+        return "Permission denied";
+    }
+    dup2(fd, 1);
+    close(fd);
+    return "";
+}

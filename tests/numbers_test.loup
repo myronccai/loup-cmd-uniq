@@ -1,0 +1,28 @@
+@mode(host.dual)
+
+from debug.assert import (expectEq);
+from cli.numbers import (MAX_SIZE, parse_size, parse_plus);
+
+func test_parse_size(): void {
+    expectEq(parse_size("12"), 12, "digits");
+    expectEq(parse_size(" 3"), 3, "leading blank");
+    expectEq(parse_size("+4"), 4, "plus sign");
+    expectEq(parse_size("-0"), 0, "minus zero");
+    expectEq(parse_size("99999999999999999999999"), MAX_SIZE, "clamped");
+}
+
+func test_parse_size_rejects(): void {
+    expectEq(parse_size(""), -1, "empty");
+    expectEq(parse_size("1 "), -1, "trailing blank");
+    expectEq(parse_size("-1"), -1, "negative");
+    expectEq(parse_size("-99999999999999999999999"), -1, "very negative");
+    expectEq(parse_size("1x"), -1, "suffix");
+    expectEq(parse_size("x"), -1, "letters");
+}
+
+func test_parse_plus(): void {
+    expectEq(parse_plus("+5"), 5, "+N");
+    expectEq(parse_plus("5"), -1, "a file name");
+    expectEq(parse_plus("+"), -1, "no digits");
+    expectEq(parse_plus("+5x"), -1, "suffix");
+}

@@ -1,0 +1,81 @@
+@mode(host.dual)
+
+from debug.assert import (expect, expectEq);
+from cli.args import (Options, parse_args);
+from commands.uniq import (uniq_bytes);
+
+# The UTF-8 bytes of an ASCII or Latin string (enough for these tests).
+func utf8(text: string): bytes {
+    var out: list[int] = [];
+    for (ch in text) {
+        var cp = 0;
+        match char.fromString(ch) {
+            Some(c) => {
+                cp = c.toInt();
+            },
+            None => {},
+        }
+        if (cp < 128) {
+            out.push(cp);
+        } else {
+            out.push(192 + cp / 64);
+            out.push(128 + cp % 64);
+        }
+    }
+    return bytesFromInts(out);
+}
+
+# uniq with options `argv` on `text`, as text.
+func uniq(argv: list[string], text: string): string {
+    let opts = parse_args(argv).unwrap();
+    return bytesFromInts(uniq_bytes(utf8(text), opts)).decode();
+}
+
+const SAMPLE: string = "a\na\nb\nc\nc\nc\nd\n";
+
+func test_default_merges_adjacent_lines(): void {
+    let none: list[string] = [];
+    expectEq(uniq(none, SAMPLE), "a\nb\nc\nd\n", "merged");
+    expectEq(uniq(none, "a\nb\na\n"), "a\nb\na\n", "only adjacent lines");
+    expectEq(uniq(none, "a\na"), "a\n", "final newline added");
+    expectEq(uniq(none, ""), "", "empty input");
+    expectEq(uniq(none, "\n\n"), "\n", "empty lines");
+}
+
+func test_selection(): void {
+    expectEq(uniq(["-c"], SAMPLE), "      2 a\n      1 b\n      3 c\n      1 d\n", "-c");
+    expectEq(uniq(["-d"], SAMPLE), "a\nc\n", "-d");
+    expectEq(uniq(["-u"], SAMPLE), "b\nd\n", "-u");
+    expectEq(uniq(["-D"], SAMPLE), "a\na\nc\nc\nc\n", "-D");
+    expectEq(uniq(["-du"], SAMPLE), "", "-d and -u");
+    expectEq(uniq(["-Du"], SAMPLE), "a\nc\nc\n", "-D and -u");
+    expectEq(uniq(["-dc"], SAMPLE), "      2 a\n      3 c\n", "-d and -c");
+}
+
+func test_all_repeated_methods(): void {
+    expectEq(uniq(["--all-repeated=prepend"], SAMPLE), "\na\na\n\nc\nc\nc\n", "prepend");
+    expectEq(uniq(["--all-repeated=separate"], SAMPLE), "a\na\n\nc\nc\nc\n", "separate");
+}
+
+func test_groups(): void {
+    expectEq(uniq(["--group"], "a\na\nb\n"), "a\na\n\nb\n", "separate");
+    expectEq(uniq(["--group=prepend"], "a\na\nb\n"), "\na\na\n\nb\n", "prepend");
+    expectEq(uniq(["--group=append"], "a\na\nb\n"), "a\na\n\nb\n\n", "append");
+    expectEq(uniq(["--group=both"], "a\na\nb\n"), "\na\na\n\nb\n\n", "both");
+}
+
+func test_comparison_options(): void {
+    let f = "x a 1\ny a 1\ny b 1\nz b 2\n";
+    expectEq(uniq(["-f", "1"], f), "x a 1\ny b 1\nz b 2\n", "-f 1");
+    expectEq(uniq(["-f", "1", "-s", "2"], f), "x a 1\nz b 2\n", "-f 1 -s 2");
+    expectEq(uniq(["-w", "1"], f), "x a 1\ny a 1\nz b 2\n", "-w 1");
+    expectEq(uniq(["-w", "0"], f), "x a 1\n", "-w 0");
+    expectEq(uniq(["-i"], "a\nA\nb\n"), "a\nb\n", "-i");
+    expectEq(uniq(["-s", "1"], "éa\nèa\n"), "éa\n", "-s counts characters");
+}
+
+func test_zero_terminated(): void {
+    let nul = str(char.of(0));
+    expectEq(uniq(["-z"], "a" + nul + "a" + nul + "b"), "a" + nul + "b" + nul, "-z");
+    expectEq(uniq(["-z"], "a\nb" + nul + "a\nb" + nul), "a\nb" + nul, "newlines are ordinary characters");
+}

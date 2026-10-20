@@ -1,98 +1,252 @@
 @mode(host.dual)
 
-# Command-line parsing. Loup 1.26 has no CLI library, so arguments are
-# parsed by hand into an Options value.
-#
-# Grammar: [OPTIONS] COMMAND [OPERANDS...]
-#   Options may appear anywhere before `--`; everything after `--` is an
-#   operand. Value options accept `--name VALUE` and `--name=VALUE`.
+# Command-line parsing for uniq, in the order GNU uniq reads its command
+# line: getopt's RETURN_IN_ORDER mode hands over options and operands as
+# they come, so an error is reported where it occurs (`uniq a b c -x`
+# complains about `c`). Besides the documented options this accepts the
+# obsolete forms GNU still does: `-N` (skip N fields) and `+N` (skip N
+# characters).
 
-pub const DEFAULT_GREETING: string = "Hello";
+from cli.argmatch import (argmatch, argmatch_error);
+from cli.getopt import (OptSpec, opt, scan_options, RETURN_IN_ORDER, OPERAND, NO_VALUE, NEEDS_VALUE, MAY_HAVE_VALUE);
+from cli.numbers import (MAX_SIZE, parse_size, parse_plus);
+from cli.quote import (quote);
 
-pub struct Options {
-    pub command: string;
-    pub operands: list[string];
-    pub help: bool;
-    pub version: bool;
-    pub verbose: bool;
-    pub shout: bool;
-    pub greeting: string;
+# --all-repeated=METHOD.
+pub const DELIMIT_NONE: int = 0;
+pub const DELIMIT_PREPEND: int = 1;
+pub const DELIMIT_SEPARATE: int = 2;
+
+# --group=METHOD.
+pub const GROUP_NONE: int = 0;
+pub const GROUP_PREPEND: int = 1;
+pub const GROUP_APPEND: int = 2;
+pub const GROUP_SEPARATE: int = 3;
+pub const GROUP_BOTH: int = 4;
+
+# A class, not a struct: it is built here and read in other modules, and
+# classes keep their layout across modules in native builds.
+pub class Options {
+    pub var help: bool = false;
+    pub var version: bool = false;
+    # An error that is not a usage error (no "Try" line), such as a bad -f.
+    pub var problem: string = "";
+    pub var count: bool = false;
+    # Which lines are printed: lines that occur once, the first line of a
+    # group of repeats, the other lines of the group.
+    pub var output_unique: bool = true;
+    pub var output_first_repeated: bool = true;
+    pub var output_later_repeated: bool = false;
+    pub var delimit: int = DELIMIT_NONE;
+    pub var grouping: int = GROUP_NONE;
+    pub var ignore_case: bool = false;
+    pub var skip_fields: int = 0;
+    pub var skip_chars: int = 0;
+    pub var check_chars: int = MAX_SIZE;
+    # 10 (newline), or 0 with -z.
+    pub var delimiter: int = 10;
+    pub var input: string = "-";
+    pub var output: string = "-";
+    pub var operand_count: int = 0;
+
+    # Takes the next file operand; false when there are two already.
+    pub modifier func add_operand(name: string): bool {
+        if (this.operand_count == 2) {
+            return false;
+        }
+        if (this.operand_count == 0) {
+            this.input = name;
+        } else {
+            this.output = name;
+        }
+        this.operand_count += 1;
+        return true;
+    }
+}
+
+func specs(): list[OptSpec] {
+    var out: list[OptSpec] = [
+        opt("c", "count", NO_VALUE, "c"),
+        opt("d", "repeated", NO_VALUE, "d"),
+        opt("D", "all-repeated", MAY_HAVE_VALUE, "D"),
+        opt("", "group", MAY_HAVE_VALUE, "group"),
+        opt("f", "skip-fields", NEEDS_VALUE, "f"),
+        opt("i", "ignore-case", NO_VALUE, "i"),
+        opt("s", "skip-chars", NEEDS_VALUE, "s"),
+        opt("u", "unique", NO_VALUE, "u"),
+        opt("w", "check-chars", NEEDS_VALUE, "w"),
+        opt("z", "zero-terminated", NO_VALUE, "z"),
+        opt("", "help", NO_VALUE, "help"),
+        opt("", "version", NO_VALUE, "version"),
+    ];
+    for (d in "0123456789") {
+        out.push(opt(d, "", NO_VALUE, "digit" + d));
+    }
+    return out;
+}
+
+func delimit_methods(): list[string] {
+    return ["none", "prepend", "separate"];
+}
+
+func group_methods(): list[string] {
+    return ["prepend", "append", "separate", "both"];
+}
+
+# Sets `problem` and returns false when `text` is not a valid count.
+func bad_count(text: string, what: string, edits opts: Options): bool {
+    safe {
+        opts.problem = text + ": invalid number of " + what;
+    }
+    return false;
 }
 
 pub func parse_args(argv: list[string]): Result[Options, string] {
-    var command = "";
-    var operands: list[string] = [];
-    var help = false;
-    var version = false;
-    var verbose = false;
-    var shout = false;
-    var greeting = DEFAULT_GREETING;
-    var only_operands = false;
+    let scan = scan_options(argv, specs(), RETURN_IN_ORDER);
+    let opts = Options();
+    # -f N and the obsolete -N both set skip_fields; -N digits accumulate
+    # (`-1 -2` is 12) until a -f starts over.
+    var digits_in_use = false;
+    var output_option_used = false;
 
-    var i = 0;
-    while (i < argv.len()) {
-        let arg = argv[i];
-        i += 1;
-
-        if (only_operands or arg == "-" or !arg.startsWith("-")) {
-            if (command.is_empty()) {
-                command = arg;
-            } else {
-                operands.push(arg);
+    for (h in scan.hits) {
+        let key = h.hit_key;
+        let value = h.hit_value;
+        if (key == OPERAND) {
+            let plus = parse_plus(value);
+            if (plus >= 0) {
+                safe {
+                    opts.skip_chars = plus;
+                }
+                continue;
+            }
+            var added = false;
+            safe {
+                added = opts.add_operand(value);
+            }
+            if (!added) {
+                return Err("extra operand " + quote(value));
             }
             continue;
         }
-        if (arg == "--") {
-            only_operands = true;
+        if (key == "help") {
+            safe {
+                opts.help = true;
+            }
+            return Ok(opts);
+        }
+        if (key == "version") {
+            safe {
+                opts.version = true;
+            }
+            return Ok(opts);
+        }
+        if (key.startsWith("digit")) {
+            let d = "0123456789".index_of(key.slice(5));
+            safe {
+                if (!digits_in_use) {
+                    opts.skip_fields = 0;
+                }
+                if (opts.skip_fields > (MAX_SIZE - d) / 10) {
+                    opts.skip_fields = MAX_SIZE;
+                } else {
+                    opts.skip_fields = opts.skip_fields * 10 + d;
+                }
+            }
+            digits_in_use = true;
             continue;
         }
-
-        # Split `--name=value` into its name and inline value.
-        var name = arg;
-        var inline_value: Option[string] = None;
-        if (arg.startsWith("--") and arg.contains("=")) {
-            let parts = arg.split("=");
-            name = parts[0];
-            inline_value = Some(parts.slice(1).join("="));
-        }
-
-        if (name == "-g" or name == "--greeting") {
-            match inline_value {
-                Some(v) => { greeting = v; },
-                None => {
-                    if (i >= argv.len()) {
-                        return Err(i"option '{$ name $}' requires a value");
-                    }
-                    greeting = argv[i];
-                    i += 1;
-                },
+        if (key == "f" or key == "s" or key == "w") {
+            let n = parse_size(value);
+            if (n < 0) {
+                let what = if (key == "f") {
+                    "fields to skip"
+                } else if (key == "s") {
+                    "bytes to skip"
+                } else {
+                    "bytes to compare"
+                };
+                bad_count(value, what, edits: opts);
+                return Ok(opts);
+            }
+            safe {
+                if (key == "f") {
+                    opts.skip_fields = n;
+                } else if (key == "s") {
+                    opts.skip_chars = n;
+                } else {
+                    opts.check_chars = n;
+                }
+            }
+            if (key == "f") {
+                digits_in_use = false;
             }
             continue;
         }
-
-        if (inline_value.is_some()) {
-            return Err(i"option '{$ name $}' does not take a value");
+        if (key == "D" or key == "group") {
+            var method = 0;
+            if (h.hit_has_value) {
+                let choices = if (key == "D") { delimit_methods() } else { group_methods() };
+                let k = argmatch(value, choices);
+                if (k < 0) {
+                    let name = if (key == "D") { "--all-repeated" } else { "--group" };
+                    return Err(argmatch_error(value, name, k, choices));
+                }
+                method = k;
+            }
+            safe {
+                if (key == "D") {
+                    opts.output_unique = false;
+                    opts.output_later_repeated = true;
+                    opts.delimit = method;
+                } else if (h.hit_has_value) {
+                    opts.grouping = method + 1;
+                } else {
+                    opts.grouping = GROUP_SEPARATE;
+                }
+            }
+            if (key == "D") {
+                output_option_used = true;
+            }
+            continue;
         }
-        if (name == "-h" or name == "--help") {
-            help = true;
-        } else if (name == "-V" or name == "--version") {
-            version = true;
-        } else if (name == "-v" or name == "--verbose") {
-            verbose = true;
-        } else if (name == "--shout") {
-            shout = true;
-        } else {
-            return Err(i"unknown option '{$ name $}'");
+        safe {
+            if (key == "c") {
+                opts.count = true;
+            } else if (key == "d") {
+                opts.output_unique = false;
+            } else if (key == "u") {
+                opts.output_first_repeated = false;
+            } else if (key == "i") {
+                opts.ignore_case = true;
+            } else if (key == "z") {
+                opts.delimiter = 0;
+            }
+        }
+        if (key == "c" or key == "d" or key == "u") {
+            output_option_used = true;
+        }
+    }
+    if (scan.scan_error.len() > 0) {
+        return Err(scan.scan_error);
+    }
+
+    # Operands after `--` are file names, even `+N`.
+    for (name in scan.operands) {
+        var added = false;
+        safe {
+            added = opts.add_operand(name);
+        }
+        if (!added) {
+            return Err("extra operand " + quote(name));
         }
     }
 
-    return Ok(Options(
-        command = command,
-        operands = operands,
-        help = help,
-        version = version,
-        verbose = verbose,
-        shout = shout,
-        greeting = greeting,
-    ));
+    if (opts.grouping != GROUP_NONE and output_option_used) {
+        return Err("--group is mutually exclusive with -c/-d/-D/-u");
+    }
+    if (opts.count and opts.output_later_repeated) {
+        return Err("printing all duplicated lines and repeat counts is meaningless");
+    }
+    return Ok(opts);
 }

@@ -1,0 +1,6 @@
+10:01 alice login
+10:02 alice login
+10:02 bob login
+10:05 Bob login
+10:07 carol logout
+10:09 carol logout

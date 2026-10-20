@@ -1,0 +1,93 @@
+@mode(host.dual)
+
+# Numbers on the command line, read the way GNU uniq reads them with
+# gnulib's xstrtoimax: optional leading blanks, an optional sign, decimal
+# digits and nothing after them. A value too large for an int is clamped
+# to MAX_SIZE, as uniq clamps it to its largest size.
+
+pub const MAX_SIZE: int = 9223372036854775807;
+
+func is_space(code: int): bool {
+    return code == 32 or (code >= 9 and code <= 13);
+}
+
+# The code of a one-character ASCII string, or -1.
+func ascii(ch: string): int {
+    let digits = "0123456789";
+    let k = digits.index_of(ch);
+    if (ch.len() == 1 and k >= 0) {
+        return 48 + k;
+    }
+    if (ch == " ") {
+        return 32;
+    }
+    if (ch == "\t") {
+        return 9;
+    }
+    if (ch == "\n") {
+        return 10;
+    }
+    if (ch == "\r") {
+        return 13;
+    }
+    if (ch == "+") {
+        return 43;
+    }
+    if (ch == "-") {
+        return 45;
+    }
+    return -1;
+}
+
+# The value of a count such as `-f N`: a whole number, at least 0. Returns
+# -1 when the text is not one (GNU then exits with "N: invalid number of
+# ...").
+pub func parse_size(text: string): int {
+    var codes: list[int] = [];
+    for (ch in text) {
+        codes.push(ascii(ch));
+    }
+    let n = codes.len();
+    var k = 0;
+    while (k < n and is_space(codes[k])) {
+        k += 1;
+    }
+    var negative = false;
+    if (k < n and (codes[k] == 43 or codes[k] == 45)) {
+        negative = codes[k] == 45;
+        k += 1;
+    }
+    var value = 0;
+    var seen = false;
+    var clamped = false;
+    while (k < n and codes[k] >= 48 and codes[k] <= 57) {
+        let d = codes[k] - 48;
+        if (!clamped and value > (MAX_SIZE - d) / 10) {
+            clamped = true;
+        }
+        if (!clamped) {
+            value = value * 10 + d;
+        }
+        seen = true;
+        k += 1;
+    }
+    if (!seen or k != n) {
+        return -1;
+    }
+    if (negative and (value > 0 or clamped)) {
+        return -1;
+    }
+    if (clamped) {
+        return MAX_SIZE;
+    }
+    return value;
+}
+
+# The N of an obsolete `+N` operand (skip N characters), or -1 when the
+# operand is not of that form and so names a file.
+pub func parse_plus(text: string): int {
+    if (!text.startsWith("+")) {
+        return -1;
+    }
+    return parse_size(text);
+}

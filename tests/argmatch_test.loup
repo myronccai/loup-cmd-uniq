@@ -1,0 +1,19 @@
+@mode(host.dual)
+
+from debug.assert import (expectEq);
+from cli.argmatch import (argmatch, argmatch_error);
+
+func test_argmatch(): void {
+    let methods = ["prepend", "append", "separate", "both"];
+    expectEq(argmatch("append", methods), 1, "exact");
+    expectEq(argmatch("s", methods), 2, "unique prefix");
+    expectEq(argmatch("x", methods), -1, "no match");
+    expectEq(argmatch("", methods), -2, "ambiguous");
+    expectEq(argmatch("p", ["pre", "prepend"]), -2, "two prefixes");
+    expectEq(argmatch("pre", ["prepend", "pre"]), 1, "exact wins");
+}
+
+func test_message(): void {
+    expectEq(argmatch_error("x", "--group", -1, ["a", "b"]), "invalid argument 'x' for '--group'\nValid arguments are:\n  - 'a'\n  - 'b'", "invalid");
+    expectEq(argmatch_error("", "--group", -2, ["a"]), "ambiguous argument '' for '--group'\nValid arguments are:\n  - 'a'", "ambiguous");
+}
