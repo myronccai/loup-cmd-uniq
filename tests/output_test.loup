@@ -18,6 +18,9 @@ func test_append_count(): void {
     var wide: list[int] = [];
     append_count(123456789, edits: wide);
     expectEq(bytesFromInts(wide).decode(), "123456789 ", "wider than 7");
+    var zero: list[int] = [];
+    append_count(0, edits: zero);
+    expectEq(bytesFromInts(zero).decode(), "      0 ", "zero has one digit");
 }
 
 func test_is_utf8(): void {

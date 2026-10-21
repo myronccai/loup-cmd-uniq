@@ -27,16 +27,16 @@ const OPEN_MODE: int32 = 438;
 
 # Appends `n` right-aligned in 7 columns and a space (printf's "%7jd ").
 pub func append_count(n: int, edits out: list[int]): void {
+    const WIDTH: int = 7;
+    # The digits, least significant first. A do/while because 0 still
+    # has one digit.
     var digits: list[int] = [];
     var v = n;
-    while (true) {
+    do {
         digits.push(48 + v % 10);
-        v = v / 10;
-        if (v == 0) {
-            break;
-        }
-    }
-    var pad = 7 - digits.len();
+        v /= 10;
+    } while (v != 0);
+    var pad = WIDTH - digits.len();
     while (pad > 0) {
         out.push(32);
         pad -= 1;

@@ -215,7 +215,12 @@ pub func run_uniq(opts: Options): int {
     }
     let data = readBytes(path);
     var out: list[int] = [];
-    uniq_into(data, opts, true, edits: out);
-    flush_bytes(edits: out);
+    # Whatever has been collected is written even if the run stops with an
+    # exception, so OUTPUT keeps every line uniq got to.
+    try {
+        uniq_into(data, opts, true, edits: out);
+    } finally {
+        flush_bytes(edits: out);
+    }
     return EXIT_OK;
 }
