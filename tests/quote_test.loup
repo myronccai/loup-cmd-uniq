@@ -1,5 +1,12 @@
 @mode(host.dual)
 
+# Unit tests for message quoting (cli.quote): quote(), quote_name() and
+# quote_always().
+#
+# Runtime: host.dual, run by the test runner: `make test` interprets this
+# file with Stage0 (`loup-bootstrap test --no-parallel`, source/ on
+# LOUPPATH), one test per `func test_*()`. It is not part of the binary.
+
 from debug.assert import (expectEq);
 from cli.quote import (quote, quote_name, quote_always);
 

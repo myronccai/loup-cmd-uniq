@@ -1,5 +1,12 @@
 @mode(host.dual)
 
+# Unit tests for gnulib's argmatch (cli.argmatch): exact, prefix, unknown
+# and ambiguous values, and the message that lists the valid ones.
+#
+# Runtime: host.dual, run by the test runner: `make test` interprets this
+# file with Stage0 (`loup-bootstrap test --no-parallel`, source/ on
+# LOUPPATH), one test per `func test_*()`. It is not part of the binary.
+
 from debug.assert import (expectEq);
 from cli.argmatch import (argmatch, argmatch_error);
 

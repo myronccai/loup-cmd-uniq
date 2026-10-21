@@ -6,6 +6,14 @@
 # complains about `c`). Besides the documented options this accepts the
 # obsolete forms GNU still does: `-N` (skip N fields) and `+N` (skip N
 # characters).
+#
+# Runtime: host.dual. Compiled into the native binary build/uniq by `make
+# build`; `loup run source/main.loup` interprets the same code.
+#
+# Structure: the METHOD constants and the Options class; the option table
+# (each digit is an option of its own, for `-N`); then parse_args, which
+# walks the hits in order, then the operands after `--`, and last checks
+# the combinations GNU rejects.
 
 from cli.argmatch import (argmatch, argmatch_error);
 from cli.getopt import (OptSpec, opt, scan_options, RETURN_IN_ORDER, OPERAND, NO_VALUE, NEEDS_VALUE, MAY_HAVE_VALUE);
@@ -112,6 +120,8 @@ pub func parse_args(argv: list[string]): Result[Options, string] {
     for (h in scan.hits) {
         let key = h.hit_key;
         let value = h.hit_value;
+        # Operands arrive among the options: an obsolete `+N` sets the
+        # characters to skip, anything else is INPUT or OUTPUT.
         if (key == OPERAND) {
             let plus = parse_plus(value);
             if (plus >= 0) {

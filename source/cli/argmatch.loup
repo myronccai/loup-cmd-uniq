@@ -3,6 +3,9 @@
 # gnulib's argmatch, which GNU uniq uses for `--all-repeated=METHOD` and
 # `--group=METHOD`: a value may be any unambiguous prefix of a valid one,
 # and an exact match always wins. Messages are gnulib's.
+#
+# Runtime: host.dual. Compiled into the native binary build/uniq by `make
+# build`; `loup run source/main.loup` interprets the same code.
 
 from cli.quote import (quote);
 

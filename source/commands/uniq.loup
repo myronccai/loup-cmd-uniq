@@ -6,6 +6,15 @@
 #
 # The input is read whole (Loup has no streaming reader); lines are byte
 # ranges in it, so nothing is copied or allocated per line.
+#
+# Runtime: host.dual. Compiled into the native binary build/uniq by `make
+# build`; `loup run source/main.loup` interprets the same code.
+# The unit tests run it through uniq_bytes, which only collects bytes.
+#
+# Structure: the Uniq class holds the state between lines (line, then
+# finish); uniq_into cuts the input into lines and feeds them to it;
+# run_uniq checks the operands, redirects the output and streams the
+# result.
 
 import io.fs as fs;
 from appinfo import (APP_NAME, EXIT_OK, EXIT_FAILURE);
@@ -78,6 +87,9 @@ pub class Uniq {
         let key = key_start(data, start, end, o.skip_fields, o.skip_chars);
         let key_stop = key_end(data, key, end, o.check_chars);
 
+        # Fast path: a line that starts a group is printed at once. With
+        # --group every line is printed, and an empty line (a delimiter)
+        # marks where groups meet.
         if (this.simple) {
             let new_group = (!this.have_prev
                 or different(data, key, key_stop, this.prev_key, this.prev_key_end, o.ignore_case));
@@ -96,6 +108,11 @@ pub class Uniq {
             return;
         }
 
+        # General path, GNU's main loop: the previous line waits until this
+        # one shows whether it was unique, the first of a group or a later
+        # repeat; `match_count` is how many lines have matched it. While
+        # repeats are not printed, `prev` stays on the group's first line,
+        # which is what later lines are compared with and what -c counts.
         if (!this.have_prev) {
             this.remember(start, end, key, key_stop);
             return;
@@ -104,6 +121,8 @@ pub class Uniq {
         if (matched) {
             this.match_count += 1;
         }
+        # -D with a METHOD: an empty line before each group of repeats
+        # (prepend) or between such groups (separate).
         if (o.delimit != DELIMIT_NONE) {
             if (!matched) {
                 if (this.match_count > 0) {

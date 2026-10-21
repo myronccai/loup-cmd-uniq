@@ -4,6 +4,9 @@
 # gnulib's xstrtoimax: optional leading blanks, an optional sign, decimal
 # digits and nothing after them. A value too large for an int is clamped
 # to MAX_SIZE, as uniq clamps it to its largest size.
+#
+# Runtime: host.dual. Compiled into the native binary build/uniq by `make
+# build`; `loup run source/main.loup` interprets the same code.
 
 pub const MAX_SIZE: int = 9223372036854775807;
 

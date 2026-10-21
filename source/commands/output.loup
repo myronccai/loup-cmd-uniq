@@ -5,8 +5,12 @@
 # else through C's putchar, because a Loup string cannot hold other bytes.
 # An OUTPUT operand becomes standard output itself, as GNU uniq's freopen
 # makes it: the file is opened with open(2) and moved onto descriptor 1.
-# The C functions exist only in a native build; `loup run` stops at them
-# ("unsupported instruction").
+#
+# Runtime: host.dual. Compiled into the native binary build/uniq by `make
+# build`, which links putchar, fflush, open, dup2 and close from the C
+# library through `extern native "c"`. Only the native binary can call
+# them: `loup run` stops at the first call ("unsupported instruction"),
+# and the unit tests (Stage0) only call append_count and is_utf8.
 
 import io.fs as fs;
 from io.path import (dirname);

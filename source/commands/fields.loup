@@ -9,6 +9,9 @@
 # character, any other byte is a character of its own (as GNU uniq 9.5
 # does in a UTF-8 locale). The comparison itself is on bytes, with -i
 # folding ASCII letters only (GNU's memcasecmp).
+#
+# Runtime: host.dual. Compiled into the native binary build/uniq by `make
+# build`; `loup run source/main.loup` interprets the same code.
 
 # The length in bytes of the character at `i` (i < lim): 2 to 4 for a
 # well-formed UTF-8 sequence that ends by `lim`, else 1.
@@ -114,6 +117,8 @@ pub func key_start(data: bytes, start: int, end: int, skip_fields: int, skip_cha
 # Where the compared part that begins at `p` ends: after at most
 # `check_chars` characters, or at `end`.
 pub func key_end(data: bytes, p: int, end: int, check_chars: int): int {
+    # A character is at least one byte, so a range no longer than
+    # `check_chars` bytes is compared whole without counting.
     if (end - p <= check_chars) {
         return end;
     }

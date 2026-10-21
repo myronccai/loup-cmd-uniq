@@ -1,5 +1,13 @@
 @mode(host.dual)
 
+# Unit tests for the parts of commands.output that do not call C: the
+# count column and the UTF-8 check. Writing through C is covered by
+# tests/e2e.sh against the native binary.
+#
+# Runtime: host.dual, run by the test runner: `make test` interprets this
+# file with Stage0 (`loup-bootstrap test --no-parallel`, source/ on
+# LOUPPATH), one test per `func test_*()`. It is not part of the binary.
+
 from debug.assert import (expect, expectEq);
 from commands.output import (append_count, is_utf8);
 

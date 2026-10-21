@@ -12,6 +12,9 @@
 # - quote_always(): the "shell-escape-always" style (quoteaf): the same,
 #   but always quoted.
 # Characters outside ASCII are written as they are, as in a UTF-8 locale.
+#
+# Runtime: host.dual. Compiled into the native binary build/uniq by `make
+# build`; `loup run source/main.loup` interprets the same code.
 
 # Characters that make a name need quotes anywhere in it.
 const SPECIAL: string = " !\"$&()*;<=>?[\\^`|'";
